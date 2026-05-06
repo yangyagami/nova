@@ -114,9 +114,38 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         signal: abortController.signal,
         onToken: (token) => {
           fullContent += token;
+
+          // Try incremental parsing — update tree view as JSON arrives
+          const partialVolumes = tryParsePartialOutline(fullContent);
+          const partialChapters = partialVolumes
+            ? partialVolumes.flatMap((v) => v.chapters.map((ch) => ({
+                ...ch,
+                volumeId: v._tempId || "",
+                projectId,
+                indexNo: 0,
+                content: "",
+                summary: "",
+                wordCount: 0,
+                status: "pending" as const,
+              })))
+            : [];
+
           set({
-            currentStep: `已接收 ${fullContent.length} 字符...`,
+            currentStep: partialVolumes
+              ? `正在生成... ${partialVolumes.length} 卷 / ${partialChapters.length} 章`
+              : `已接收 ${fullContent.length} 字符...`,
             streamingContent: fullContent,
+            generatedVolumes: partialVolumes
+              ? partialVolumes.map((v) => ({
+                  id: v._tempId || "",
+                  projectId,
+                  indexNo: v._indexNo || 0,
+                  title: v.title,
+                  summary: v.summary || "",
+                  arcGoal: v.arcGoal || "",
+                }))
+              : [],
+            generatedChapters: partialChapters,
           });
         },
       });
@@ -407,6 +436,47 @@ function normaliseChapter(c: RawChapter): { title: string; outline: string; horr
     horrorBeat: c.horrorBeat || c.core_horror || "",
     hook: c.hook || c.chapter_hook || "",
   };
+}
+
+/**
+ * Try to incrementally parse partial JSON during streaming.
+ * Uses repairJSON to close open brackets, then extracts what we can.
+ */
+function tryParsePartialOutline(content: string): (ParsedVolume & { _tempId: string; _indexNo: number })[] | null {
+  if (!content || content.length < 20) return null;
+
+  const repaired = repairJSON(content);
+  let parsed: any;
+  try {
+    parsed = JSON.parse(repaired);
+  } catch {
+    return null;
+  }
+
+  // Extract raw volumes
+  let rawVolumes: any[];
+  if (Array.isArray(parsed)) {
+    rawVolumes = parsed;
+  } else if (parsed.volumes && Array.isArray(parsed.volumes)) {
+    rawVolumes = parsed.volumes;
+  } else {
+    const arrayKey = Object.keys(parsed).find((k) => Array.isArray(parsed[k]));
+    if (arrayKey) rawVolumes = parsed[arrayKey];
+    else return null;
+  }
+
+  if (rawVolumes.length === 0) return null;
+
+  const counter = { vi: 0 };
+  return rawVolumes.map((v) => {
+    counter.vi++;
+    const vol = normaliseVolume(v);
+    return {
+      ...vol,
+      _tempId: `temp_${counter.vi}`,
+      _indexNo: counter.vi,
+    };
+  });
 }
 
 function parseOutlineJSON(content: string): ParsedOutline | null {

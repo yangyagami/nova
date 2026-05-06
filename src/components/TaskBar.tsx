@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useGenerationStore } from "@/stores/generationStore";
 import { Button } from "@/components/ui/button";
@@ -12,24 +12,15 @@ import {
   ChevronUp,
   ChevronDown,
   ExternalLink,
-  Maximize2,
-  Minimize2,
+  BookOpen,
+  FileText,
 } from "lucide-react";
 
 export default function TaskBar() {
   const navigate = useNavigate();
-  const { task, status, currentStep, streamingContent, error, cancelGeneration, dismissTask, retryTask } =
+  const { task, status, currentStep, error, cancelGeneration, dismissTask, retryTask } =
     useGenerationStore();
   const [minimized, setMinimized] = useState(false);
-  const [showStream, setShowStream] = useState(false);
-  const streamEndRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll stream content
-  useEffect(() => {
-    if (showStream && status === "generating") {
-      streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [streamingContent, showStream, status]);
 
   // No task → nothing to show
   if (!task) return null;
@@ -56,12 +47,15 @@ export default function TaskBar() {
     navigate(`/project/${task.projectId}/outline`);
   };
 
+  const volumesCount = useGenerationStore.getState().generatedVolumes.length;
+  const chaptersCount = useGenerationStore.getState().generatedChapters.length;
+
   return (
     <div
       className={cn(
         "fixed bottom-0 left-0 right-0 z-50 border-t transition-all duration-200",
         statusColor(),
-        minimized ? "h-10" : showStream ? "h-80" : "h-16"
+        minimized ? "h-10" : "h-16"
       )}
     >
       {/* Handle bar — always visible */}
@@ -85,19 +79,6 @@ export default function TaskBar() {
         >
           {minimized ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </Button>
-
-        {/* Show stream toggle (for running tasks) */}
-        {isRunning && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => setShowStream(!showStream)}
-            title={showStream ? "隐藏输出" : "显示输出"}
-          >
-            {showStream ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-          </Button>
-        )}
 
         {/* Navigate to project page */}
         <Button
@@ -135,22 +116,20 @@ export default function TaskBar() {
         )}
       </div>
 
-      {/* Expanded content */}
+      {/* Expanded content — no raw JSON, just progress info */}
       {!minimized && (
         <div className="h-full overflow-hidden">
-          {isRunning && showStream && (
-            <div className="h-[calc(100%-2.5rem)] overflow-y-auto p-4">
-              <div className="rounded-md bg-black/20 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap h-full overflow-y-auto">
-                {streamingContent ? (
-                  <>
-                    {streamingContent}
-                    <span className="inline-block w-1.5 h-3 bg-primary animate-pulse ml-0.5" />
-                  </>
-                ) : (
-                  <span className="text-muted-foreground">等待 AI 响应...</span>
-                )}
-                <div ref={streamEndRef} />
-              </div>
+          {isRunning && (
+            <div className="flex items-center gap-4 p-3 text-sm text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <BookOpen className="h-4 w-4" />
+                <span>{volumesCount} 卷</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <FileText className="h-4 w-4" />
+                <span>{chaptersCount} 章</span>
+              </span>
+              <span className="text-primary animate-pulse text-xs ml-auto">{currentStep}</span>
             </div>
           )}
 

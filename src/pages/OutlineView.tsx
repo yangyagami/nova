@@ -5,7 +5,7 @@ import { useGenerationStore } from "@/stores/generationStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Sparkles, Loader2, XCircle, BookOpen, ChevronDown, ChevronRight, FileText, AlertCircle, CheckCircle2, Maximize2, Minimize2 } from "lucide-react";
+import { ArrowLeft, Sparkles, Loader2, XCircle, BookOpen, ChevronDown, ChevronRight, FileText, AlertCircle, CheckCircle2 } from "lucide-react";
 import { subgenreLabel } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +17,6 @@ export default function OutlineView() {
     status,
     currentStep,
     error,
-    streamingContent,
     generatedVolumes,
     generatedChapters,
     generateOutline,
@@ -28,8 +27,6 @@ export default function OutlineView() {
 
   const [expandedVolumes, setExpandedVolumes] = useState<Set<string>>(new Set());
   const [initialLoadDone, setInitialLoadDone] = useState(false);
-  const [showStreamPanel, setShowStreamPanel] = useState(true);
-  const streamEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (id) {
@@ -48,19 +45,18 @@ export default function OutlineView() {
     }
   }, [currentProject, initialLoadDone, loadOutline, ensureOutlineForProject]);
 
-  // Auto-expand after generation
+  // Auto-expand volumes as they arrive during streaming
   useEffect(() => {
-    if (status === "done" && generatedVolumes.length > 0) {
-      setExpandedVolumes(new Set(generatedVolumes.map((v) => v.id)));
+    if (generatedVolumes.length > 0) {
+      setExpandedVolumes((prev) => {
+        const next = new Set(prev);
+        for (const v of generatedVolumes) {
+          next.add(v.id);
+        }
+        return next;
+      });
     }
-  }, [status, generatedVolumes]);
-
-  // Auto-scroll streaming content
-  useEffect(() => {
-    if (status === "generating") {
-      streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [streamingContent, status]);
+  }, [generatedVolumes]);
 
   const toggleVolume = (volumeId: string) => {
     setExpandedVolumes((prev) => {
@@ -152,48 +148,20 @@ export default function OutlineView() {
         </Card>
       )}
 
-      {/* Generating — show streaming output */}
+      {/* Generating — progress bar, no raw JSON */}
       {status === "generating" && (
-        <div className="space-y-4">
-          {/* Progress indicator */}
-          <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50">
-            <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">{currentStep}</p>
-              <div className="w-full bg-border rounded-full h-1 mt-1.5 overflow-hidden">
-                <div className="bg-primary h-full rounded-full animate-pulse" style={{ width: "60%" }} />
-              </div>
+        <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50">
+          <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">{currentStep}</p>
+            <div className="w-full bg-border rounded-full h-1 mt-1.5 overflow-hidden">
+              <div className="bg-primary h-full rounded-full animate-pulse" style={{ width: "50%" }} />
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setShowStreamPanel(!showStreamPanel)}>
-              {showStreamPanel ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            </Button>
-            <Button variant="outline" size="sm" onClick={cancelGeneration}>
-              <XCircle className="h-4 w-4 mr-1" />
-              取消
-            </Button>
           </div>
-
-          {/* Streaming text viewer */}
-          {showStreamPanel && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-muted-foreground">AI 实时输出</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="max-h-96 overflow-y-auto rounded-md bg-black/20 p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap">
-                  {streamingContent ? (
-                    <>
-                      {streamingContent}
-                      <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-0.5" />
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">等待 AI 响应...</span>
-                  )}
-                  <div ref={streamEndRef} />
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          <Button variant="outline" size="sm" onClick={cancelGeneration}>
+            <XCircle className="h-4 w-4 mr-1" />
+            取消
+          </Button>
         </div>
       )}
 
@@ -208,14 +176,6 @@ export default function OutlineView() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">{error}</p>
-            {streamingContent && (
-              <details className="text-xs text-muted-foreground">
-                <summary className="cursor-pointer hover:text-foreground">查看已接收的内容</summary>
-                <pre className="mt-2 p-3 rounded-md bg-black/20 max-h-48 overflow-y-auto whitespace-pre-wrap">
-                  {streamingContent}
-                </pre>
-              </details>
-            )}
             <div className="flex gap-2">
               <Button onClick={handleGenerate}>重试</Button>
               <Button variant="outline" onClick={() => navigate(`/project/${id}`)}>
@@ -226,7 +186,7 @@ export default function OutlineView() {
         </Card>
       )}
 
-      {/* Outline tree */}
+      {/* Outline tree — visible both during and after generation */}
       {generatedVolumes.length > 0 && (
         <>
           {/* Summary bar */}
@@ -244,9 +204,12 @@ export default function OutlineView() {
                     <span className="text-muted-foreground">章:</span>
                     <span className="font-medium">{totalChapters}</span>
                   </span>
+                  {status === "generating" && (
+                    <span className="text-xs text-primary animate-pulse">正在生成中...</span>
+                  )}
                 </div>
                 <Badge variant="outline" className="text-xs">
-                  {status === "done" ? "✓ 已保存" : "已加载"}
+                  {status === "done" ? "✓ 已保存" : status === "generating" ? "⏳ 生成中" : "已加载"}
                 </Badge>
               </div>
             </CardContent>
@@ -277,6 +240,9 @@ export default function OutlineView() {
                         <p className="text-xs text-muted-foreground mt-0.5 truncate">
                           目标：{volume.arcGoal}
                         </p>
+                      )}
+                      {volume.summary && (
+                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{volume.summary}</p>
                       )}
                     </div>
                     <span className="text-xs text-muted-foreground shrink-0">{chapters.length} 章</span>
