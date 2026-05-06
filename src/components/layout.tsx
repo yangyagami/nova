@@ -1,6 +1,7 @@
-import { Outlet, NavLink, useLocation } from "react-router-dom";
+import { Outlet, NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { BookOpen, Settings, PenLine } from "lucide-react";
+import TaskBar from "@/components/TaskBar";
 
 const navItems = [
   { to: "/", label: "项目", icon: BookOpen },
@@ -8,8 +9,6 @@ const navItems = [
 ];
 
 export default function Layout() {
-  const location = useLocation();
-
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Top Navigation */}
@@ -44,9 +43,12 @@ export default function Layout() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1">
+      <main className="flex-1 pb-16">
         <Outlet />
       </main>
+
+      {/* Global Task Bar (background tasks) */}
+      <TaskBar />
     </div>
   );
 }

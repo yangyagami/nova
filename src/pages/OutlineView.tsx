@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useProjectStore } from "@/stores/projectStore";
 import { useGenerationStore } from "@/stores/generationStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Sparkles, Loader2, XCircle, BookOpen, ChevronDown, ChevronRight, FileText, AlertCircle, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Sparkles, Loader2, XCircle, BookOpen, ChevronDown, ChevronRight, FileText, AlertCircle, CheckCircle2, Maximize2, Minimize2 } from "lucide-react";
 import { subgenreLabel } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +17,7 @@ export default function OutlineView() {
     status,
     currentStep,
     error,
+    streamingContent,
     generatedVolumes,
     generatedChapters,
     generateOutline,
@@ -26,6 +27,8 @@ export default function OutlineView() {
 
   const [expandedVolumes, setExpandedVolumes] = useState<Set<string>>(new Set());
   const [initialLoadDone, setInitialLoadDone] = useState(false);
+  const [showStreamPanel, setShowStreamPanel] = useState(true);
+  const streamEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (id) {
@@ -33,7 +36,7 @@ export default function OutlineView() {
     }
   }, [id, getProject]);
 
-  // Load existing outline if project status is "outlining" or "writing"
+  // Load existing outline
   useEffect(() => {
     if (currentProject && !initialLoadDone) {
       if (currentProject.status === "outlining" || currentProject.status === "writing") {
@@ -43,28 +46,32 @@ export default function OutlineView() {
     }
   }, [currentProject, initialLoadDone, loadOutline]);
 
-  // Auto-expand volumes after generation
+  // Auto-expand after generation
   useEffect(() => {
     if (status === "done" && generatedVolumes.length > 0) {
       setExpandedVolumes(new Set(generatedVolumes.map((v) => v.id)));
     }
   }, [status, generatedVolumes]);
 
+  // Auto-scroll streaming content
+  useEffect(() => {
+    if (status === "generating") {
+      streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [streamingContent, status]);
+
   const toggleVolume = (volumeId: string) => {
     setExpandedVolumes((prev) => {
       const next = new Set(prev);
-      if (next.has(volumeId)) {
-        next.delete(volumeId);
-      } else {
-        next.add(volumeId);
-      }
+      if (next.has(volumeId)) next.delete(volumeId);
+      else next.add(volumeId);
       return next;
     });
   };
 
   const handleGenerate = () => {
     if (!currentProject) return;
-    generateOutline(currentProject.id, {
+    generateOutline(currentProject.id, currentProject.title, {
       subgenre: currentProject.subgenre,
       premise: currentProject.premise,
       targetChapters: currentProject.targetChapters,
@@ -76,7 +83,6 @@ export default function OutlineView() {
     generatedChapters.filter((ch) => ch.volumeId === volumeId);
 
   const totalChapters = generatedChapters.length;
-  const doneChapters = generatedChapters.filter((ch) => ch.status === "done").length;
 
   if (loading && !currentProject) {
     return (
@@ -113,7 +119,7 @@ export default function OutlineView() {
         </div>
       </div>
 
-      {/* Generation Status / Actions */}
+      {/* Initial — generate CTA */}
       {status === "idle" && generatedVolumes.length === 0 && (
         <Card>
           <CardHeader>
@@ -122,7 +128,7 @@ export default function OutlineView() {
               生成大纲
             </CardTitle>
             <CardDescription>
-              点击下方按钮，AI 将根据你的核心创意自动生成全书分卷大纲和章节细纲。
+              AI 将根据你的核心创意自动生成全书分卷大纲和章节细纲。
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -144,26 +150,49 @@ export default function OutlineView() {
         </Card>
       )}
 
-      {/* Generating */}
+      {/* Generating — show streaming output */}
       {status === "generating" && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              正在生成大纲...
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              <span className="text-sm text-muted-foreground">{currentStep}</span>
+        <div className="space-y-4">
+          {/* Progress indicator */}
+          <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50">
+            <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">{currentStep}</p>
+              <div className="w-full bg-border rounded-full h-1 mt-1.5 overflow-hidden">
+                <div className="bg-primary h-full rounded-full animate-pulse" style={{ width: "60%" }} />
+              </div>
             </div>
-            <Button variant="outline" onClick={cancelGeneration}>
-              <XCircle className="h-4 w-4 mr-2" />
-              取消生成
+            <Button variant="ghost" size="sm" onClick={() => setShowStreamPanel(!showStreamPanel)}>
+              {showStreamPanel ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </Button>
-          </CardContent>
-        </Card>
+            <Button variant="outline" size="sm" onClick={cancelGeneration}>
+              <XCircle className="h-4 w-4 mr-1" />
+              取消
+            </Button>
+          </div>
+
+          {/* Streaming text viewer */}
+          {showStreamPanel && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-muted-foreground">AI 实时输出</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="max-h-96 overflow-y-auto rounded-md bg-black/20 p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap">
+                  {streamingContent ? (
+                    <>
+                      {streamingContent}
+                      <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-0.5" />
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">等待 AI 响应...</span>
+                  )}
+                  <div ref={streamEndRef} />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
       {/* Error */}
@@ -177,6 +206,14 @@ export default function OutlineView() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">{error}</p>
+            {streamingContent && (
+              <details className="text-xs text-muted-foreground">
+                <summary className="cursor-pointer hover:text-foreground">查看已接收的内容</summary>
+                <pre className="mt-2 p-3 rounded-md bg-black/20 max-h-48 overflow-y-auto whitespace-pre-wrap">
+                  {streamingContent}
+                </pre>
+              </details>
+            )}
             <div className="flex gap-2">
               <Button onClick={handleGenerate}>重试</Button>
               <Button variant="outline" onClick={() => navigate(`/project/${id}`)}>
@@ -187,10 +224,10 @@ export default function OutlineView() {
         </Card>
       )}
 
-      {/* Outline Tree */}
-      {(generatedVolumes.length > 0) && (
+      {/* Outline tree */}
+      {generatedVolumes.length > 0 && (
         <>
-          {/* Summary */}
+          {/* Summary bar */}
           <Card>
             <CardContent className="py-4">
               <div className="flex items-center justify-between">
@@ -205,13 +242,6 @@ export default function OutlineView() {
                     <span className="text-muted-foreground">章:</span>
                     <span className="font-medium">{totalChapters}</span>
                   </span>
-                  {doneChapters > 0 && (
-                    <span className="flex items-center gap-1.5">
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                      <span className="text-muted-foreground">已完成:</span>
-                      <span className="font-medium">{doneChapters}/{totalChapters}</span>
-                    </span>
-                  )}
                 </div>
                 <Badge variant="outline" className="text-xs">
                   {status === "done" ? "✓ 已保存" : "已加载"}
@@ -220,7 +250,7 @@ export default function OutlineView() {
             </CardContent>
           </Card>
 
-          {/* Volume / Chapter Tree */}
+          {/* Volume / Chapter tree */}
           <div className="space-y-3">
             {generatedVolumes.map((volume) => {
               const chapters = chaptersForVolume(volume.id);
@@ -232,11 +262,7 @@ export default function OutlineView() {
                     onClick={() => toggleVolume(volume.id)}
                   >
                     <Button variant="ghost" size="icon" className="h-6 w-6">
-                      {isExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
+                      {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                     </Button>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -251,9 +277,7 @@ export default function OutlineView() {
                         </p>
                       )}
                     </div>
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      {chapters.length} 章
-                    </span>
+                    <span className="text-xs text-muted-foreground shrink-0">{chapters.length} 章</span>
                   </div>
 
                   {isExpanded && (
@@ -272,35 +296,20 @@ export default function OutlineView() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <h4 className="text-sm font-medium truncate">{chapter.title}</h4>
-                              {chapter.status === "done" && (
-                                <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                              )}
                             </div>
                             {chapter.outline && (
-                              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
-                                {chapter.outline}
-                              </p>
+                              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{chapter.outline}</p>
                             )}
                             <div className="flex gap-3 mt-1.5">
                               {chapter.horrorBeat && (
-                                <span className="text-xs text-primary/80">
-                                  🎯 {chapter.horrorBeat}
-                                </span>
+                                <span className="text-xs text-primary/80">🎯 {chapter.horrorBeat}</span>
                               )}
                               {chapter.hook && (
-                                <span className="text-xs text-amber-500/80">
-                                  🪝 {chapter.hook}
-                                </span>
+                                <span className="text-xs text-amber-500/80">🪝 {chapter.hook}</span>
                               )}
                             </div>
                           </div>
-                          <Badge
-                            variant={chapter.status === "done" ? "default" : "outline"}
-                            className={cn(
-                              "shrink-0 text-xs",
-                              chapter.status === "done" && "bg-green-600"
-                            )}
-                          >
+                          <Badge variant="outline" className="shrink-0 text-xs">
                             {chapter.status === "done" ? "已完成" : chapter.status === "pending" ? "待生成" : chapter.status}
                           </Badge>
                         </div>
@@ -312,7 +321,7 @@ export default function OutlineView() {
             })}
           </div>
 
-          {/* Bottom Actions */}
+          {/* Bottom actions */}
           <div className="flex justify-between items-center">
             <p className="text-xs text-muted-foreground">
               共 {generatedVolumes.length} 卷，{totalChapters} 章
@@ -324,9 +333,7 @@ export default function OutlineView() {
                   重新生成
                 </Button>
               )}
-              <Button onClick={() => navigate(`/project/${id}`)}>
-                返回项目
-              </Button>
+              <Button onClick={() => navigate(`/project/${id}`)}>返回项目</Button>
             </div>
           </div>
         </>

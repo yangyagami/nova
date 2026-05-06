@@ -5,20 +5,34 @@ import { chatCompletion } from "@/services/deepseek";
 import { buildOutlinePrompt } from "@/services/prompt";
 import type { Volume, Chapter } from "@/types";
 
-type GenerationStatus = "idle" | "generating" | "done" | "error";
+export type GenerationStatus = "idle" | "generating" | "done" | "error";
+export type TaskType = "outline" | "chapter" | "polish";
+
+export interface TaskInfo {
+  type: TaskType;
+  projectId: string;
+  projectTitle: string;
+  label: string; // e.g. "生成大纲"、"第 3 章生成"
+}
 
 interface GenerationState {
+  // Task info (for global task bar)
+  task: TaskInfo | null;
+
   status: GenerationStatus;
   currentStep: string;
   error: string | null;
   abortController: AbortController | null;
+
+  // Raw streaming output — visible in real time
+  streamingContent: string;
 
   // Generated outline data
   generatedVolumes: Volume[];
   generatedChapters: Chapter[];
 
   // Actions
-  generateOutline: (projectId: string, params: {
+  generateOutline: (projectId: string, projectTitle: string, params: {
     subgenre: string;
     premise: string;
     targetChapters: number;
@@ -26,6 +40,8 @@ interface GenerationState {
     characters?: { name: string; role: string; identity: string; secret: string }[];
   }) => Promise<void>;
   cancelGeneration: () => void;
+  dismissTask: () => void;
+  retryTask: () => void;
   reset: () => void;
   loadOutline: (projectId: string) => Promise<void>;
 }
@@ -37,23 +53,34 @@ function generateId(prefix: string): string {
 }
 
 export const useGenerationStore = create<GenerationState>((set, get) => ({
+  task: null,
   status: "idle",
   currentStep: "",
   error: null,
   abortController: null,
+  streamingContent: "",
   generatedVolumes: [],
   generatedChapters: [],
 
-  generateOutline: async (projectId, params) => {
+  generateOutline: async (projectId, projectTitle, params) => {
     const abortController = new AbortController();
+
+    // Store params for retry
+    const lastParams = { projectId, projectTitle, params };
+
     set({
+      task: { type: "outline", projectId, projectTitle, label: "生成大纲" },
       status: "generating",
       currentStep: "正在连接 API...",
       error: null,
       abortController,
+      streamingContent: "",
       generatedVolumes: [],
       generatedChapters: [],
     });
+
+    // Store for retry
+    (get as any).__lastOutlineParams = lastParams;
 
     try {
       const settings = useSettingsStore.getState().settings;
@@ -75,7 +102,10 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         signal: abortController.signal,
         onToken: (token) => {
           fullContent += token;
-          set({ currentStep: `已接收 ${fullContent.length} 字符...` });
+          set({
+            currentStep: `已接收 ${fullContent.length} 字符...`,
+            streamingContent: fullContent,
+          });
         },
       });
 
@@ -96,7 +126,6 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       for (let vi = 0; vi < parsed.volumes.length; vi++) {
         const v = parsed.volumes[vi];
         const volumeId = generateId("vol");
-        const now = Math.floor(Date.now() / 1000);
 
         await db.execute(
           `INSERT INTO volumes (id, project_id, index_no, title, summary, arc_goal)
@@ -184,16 +213,29 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     const { abortController } = get();
     if (abortController) {
       abortController.abort();
-      set({ abortController: null });
+      set({ abortController: null, task: null, status: "idle" });
+    }
+  },
+
+  dismissTask: () => {
+    set({ task: null, status: "idle", streamingContent: "", error: null });
+  },
+
+  retryTask: () => {
+    const lastParams = (get as any).__lastOutlineParams;
+    if (lastParams) {
+      get().generateOutline(lastParams.projectId, lastParams.projectTitle, lastParams.params);
     }
   },
 
   reset: () => {
     set({
+      task: null,
       status: "idle",
       currentStep: "",
       error: null,
       abortController: null,
+      streamingContent: "",
       generatedVolumes: [],
       generatedChapters: [],
     });
@@ -234,7 +276,6 @@ interface ParsedOutline {
 }
 
 function parseOutlineJSON(content: string): ParsedOutline | null {
-  // Try to extract JSON from the response (it might be wrapped in markdown code blocks)
   let jsonStr = content;
 
   // Remove markdown code block fences
@@ -243,7 +284,7 @@ function parseOutlineJSON(content: string): ParsedOutline | null {
     jsonStr = jsonMatch[1].trim();
   }
 
-  // Try to find a JSON object/array in the remaining text
+  // Try to find a JSON object/array
   const objectMatch = jsonStr.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
   if (objectMatch) {
     jsonStr = objectMatch[1];
@@ -252,14 +293,12 @@ function parseOutlineJSON(content: string): ParsedOutline | null {
   try {
     const parsed = JSON.parse(jsonStr);
 
-    // Handle both { volumes: [...] } and [...] formats
     let volumes: ParsedOutline["volumes"];
     if (Array.isArray(parsed)) {
       volumes = parsed;
     } else if (parsed.volumes) {
       volumes = parsed.volumes;
     } else {
-      // Try to find any array in the parsed object
       const arrayKey = Object.keys(parsed).find((k) => Array.isArray(parsed[k]));
       if (arrayKey) {
         volumes = parsed[arrayKey];
@@ -270,7 +309,6 @@ function parseOutlineJSON(content: string): ParsedOutline | null {
 
     return { volumes };
   } catch {
-    // If JSON parsing fails, try to do a structured extraction
     return null;
   }
 }
