@@ -4,6 +4,7 @@ export {
   buildPolishPrompt,
   buildSummarizePrompt,
   buildLoreExtractPrompt,
+  buildExamplePrompt,
 } from "./builder";
 
 export type {

@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useProjectStore } from "@/stores/projectStore";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { chatCompletion } from "@/services/deepseek";
+import { buildExamplePrompt } from "@/services/prompt";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Plus, BookOpen, Trash2, Clock, Target, FileText } from "lucide-react";
+import { Plus, BookOpen, Trash2, Clock, Target, FileText, Loader2, Sparkles } from "lucide-react";
 import { formatDate, subgenreLabel, statusLabel } from "@/lib/utils";
 import type { Subgenre } from "@/types";
 
@@ -25,6 +28,7 @@ export default function Dashboard() {
     wordsPerChapter: 3000,
   });
   const [creating, setCreating] = useState(false);
+  const [generatingTemplate, setGeneratingTemplate] = useState(false);
 
   useEffect(() => {
     listProjects();
@@ -57,30 +61,73 @@ export default function Dashboard() {
     }
   };
 
-  // Template presets
-  const fillTemplate = (type: "folk_horror" | "urban_legend") => {
-    if (type === "folk_horror") {
-      setNewProject({
-        title: "老屋",
-        subgenre: "folk_horror",
-        premise: "返乡青年发现祖宅地下埋着七口棺材，村里老人说这是「镇宅」，但棺材里的东西正在一个个消失。",
-        protagonistName: "陈远",
-        targetWords: 50000,
-        targetChapters: 15,
-        wordsPerChapter: 3000,
-      });
-    } else {
-      setNewProject({
-        title: "最后一班地铁",
-        subgenre: "urban_legend",
-        premise: "每晚末班地铁的最后一节车厢总有一个空位，坐上去的人第二天都会消失。",
-        protagonistName: "林晚",
-        targetWords: 30000,
-        targetChapters: 10,
-        wordsPerChapter: 3000,
-      });
-    }
+  // 硬编码备用示例
+  const FALLBACK_TEMPLATES = {
+    folk_horror: {
+      title: "老屋",
+      subgenre: "folk_horror" as Subgenre,
+      premise: "返乡青年发现祖宅地下埋着七口棺材，村里老人说这是「镇宅」，但棺材里的东西正在一个个消失。",
+      protagonistName: "陈远",
+      targetWords: 50000,
+      targetChapters: 15,
+      wordsPerChapter: 3000,
+    },
+    urban_legend: {
+      title: "最后一班地铁",
+      subgenre: "urban_legend" as Subgenre,
+      premise: "每晚末班地铁的最后一节车厢总有一个空位，坐上去的人第二天都会消失。",
+      protagonistName: "林晚",
+      targetWords: 30000,
+      targetChapters: 10,
+      wordsPerChapter: 3000,
+    },
+  };
+
+  // 通过 AI 生成示例
+  const fillTemplate = async (type: "folk_horror" | "urban_legend") => {
+    setGeneratingTemplate(true);
     setShowNewDialog(true);
+
+    try {
+      await useSettingsStore.getState().ensureLoaded();
+      const settings = useSettingsStore.getState().settings;
+
+      if (!settings.apiKey) throw new Error("未配置 API Key");
+
+      const messages = buildExamplePrompt(type);
+
+      const result = await chatCompletion(settings.apiKey, {
+        messages,
+        model: settings.model,
+        temperature: 0.9,
+        maxTokens: 1024,
+        apiBaseUrl: settings.apiBaseUrl,
+      });
+
+      // 解析 AI 返回的 JSON
+      const jsonMatch = result.content.match(/```(?:json)?\s*([\s\S]*?)```/);
+      const jsonStr = jsonMatch ? jsonMatch[1].trim() : result.content.trim();
+      const parsed = JSON.parse(jsonStr);
+
+      if (!parsed.title || !parsed.premise) {
+        throw new Error("AI 返回格式不完整");
+      }
+
+      setNewProject({
+        title: parsed.title || "",
+        subgenre: type,
+        premise: parsed.premise || "",
+        protagonistName: parsed.protagonistName || "",
+        targetWords: parsed.targetWords || FALLBACK_TEMPLATES[type].targetWords,
+        targetChapters: parsed.targetChapters || FALLBACK_TEMPLATES[type].targetChapters,
+        wordsPerChapter: parsed.wordsPerChapter || FALLBACK_TEMPLATES[type].wordsPerChapter,
+      });
+    } catch {
+      // AI 生成失败 → 使用内置模板
+      setNewProject({ ...FALLBACK_TEMPLATES[type] });
+    } finally {
+      setGeneratingTemplate(false);
+    }
   };
 
   return (
@@ -92,10 +139,12 @@ export default function Dashboard() {
           <p className="text-muted-foreground mt-1">恐怖小说生成器</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => fillTemplate("folk_horror")}>
+          <Button variant="outline" onClick={() => fillTemplate("folk_horror")} disabled={generatingTemplate}>
+            {generatingTemplate ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1" />}
             民俗恐怖示例
           </Button>
-          <Button variant="outline" onClick={() => fillTemplate("urban_legend")}>
+          <Button variant="outline" onClick={() => fillTemplate("urban_legend")} disabled={generatingTemplate}>
+            {generatingTemplate ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1" />}
             都市怪谈示例
           </Button>
           <Button onClick={() => setShowNewDialog(true)}>

@@ -122,6 +122,29 @@ const POLISH_PROMPTS: Record<string, string> = {
   first_person: "将以下段落改为第一人称限制视角（'我'），只描述主角能感知到的内容，不透露其他人的想法。",
 };
 
+// ============== 示例生成提示 ==============
+const EXAMPLE_PROMPT = `【任务：生成项目示例】
+请根据子类型生成一个恐怖小说的完整项目模板。
+
+要求：
+1. 标题要独特且有意境（不要用「老屋」「最后一班地铁」这类常见标题）
+2. 核心理念（premise）控制在 30-50 字，一句话讲清楚恐怖设定
+3. 主角名字要贴合背景且有辨识度
+4. 总字数和章节数要合理匹配（民俗恐怖通常偏长，都市怪谈偏短）
+
+请严格按照以下 JSON 格式输出：
+\`\`\`json
+{
+  "title": "小说标题",
+  "premise": "核心创意（30-50字）",
+  "protagonistName": "主角名字",
+  "targetWords": 总字数,
+  "targetChapters": 章节数,
+  "wordsPerChapter": 每章字数
+}
+\`\`\`
+注意：不要包含其他内容，确保 JSON 格式正确。`;
+
 // ============== Public API ==============
 
 export interface BuildOutlinePromptParams {
@@ -238,5 +261,29 @@ export function buildLoreExtractPrompt(chapterContent: string): Message[] {
   return [
     { role: "system", content: TASK_PROMPTS.extract_lore },
     { role: "user", content: chapterContent },
+  ];
+}
+
+/**
+ * 构建项目示例生成 prompt
+ */
+export function buildExamplePrompt(subgenre: string): Message[] {
+  const genreLabel = subgenre === "folk_horror" ? "民俗恐怖" : "都市怪谈";
+  const genreGuide =
+    subgenre === "folk_horror"
+      ? SUBGENRE_PROMPTS.folk_horror
+      : SUBGENRE_PROMPTS.urban_legend;
+
+  return [
+    {
+      role: "system",
+      content: `你是一位创意十足的恐怖小说策划人。${genreGuide}
+
+${EXAMPLE_PROMPT}`,
+    },
+    {
+      role: "user",
+      content: `请为「${genreLabel}」类型生成一个全新的项目示例。要有独创性，不能与已有的知名作品雷同。`,
+    },
   ];
 }
