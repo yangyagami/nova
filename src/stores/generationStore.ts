@@ -275,40 +275,153 @@ interface ParsedOutline {
   }[];
 }
 
-function parseOutlineJSON(content: string): ParsedOutline | null {
-  let jsonStr = content;
+// ============== JSON Parser (robust) ==============
 
-  // Remove markdown code block fences
-  const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+interface RawOutline {
+  total_chapters?: number;
+  volumes?: RawVolume[];
+}
+
+interface RawVolume {
+  title?: string;
+  summary?: string;
+  arcGoal?: string;
+  chapters?: RawChapter[];
+  // Alternative field names used by AI
+  volume_name?: string;
+  volume_summary?: string;
+  volume_goal?: string;
+  volume_arc?: string;
+  chapter_count?: number;
+}
+
+interface RawChapter {
+  title?: string;
+  outline?: string;
+  horrorBeat?: string;
+  hook?: string;
+  // Alternative field names
+  chapter_title?: string;
+  chapter_outline?: string;
+  core_horror?: string;
+  chapter_hook?: string;
+  summary?: string;
+  content?: string;
+}
+
+/**
+ * Repair common JSON formatting issues from LLM output:
+ * - Double commas (,, → ,)
+ * - Trailing commas before ] or }
+ * - Truncated JSON (missing closing brackets — append them)
+ * - Single quotes instead of double quotes
+ */
+function repairJSON(raw: string): string {
+  let s = raw;
+
+  // Remove markdown code blocks
+  const jsonMatch = s.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (jsonMatch) {
-    jsonStr = jsonMatch[1].trim();
+    s = jsonMatch[1].trim();
   }
 
-  // Try to find a JSON object/array
-  const objectMatch = jsonStr.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-  if (objectMatch) {
-    jsonStr = objectMatch[1];
+  // Find the outermost JSON object/array
+  const objStart = s.indexOf("{");
+  const arrStart = s.indexOf("[");
+  const jsonStart = objStart >= 0 && (arrStart < 0 || objStart < arrStart) ? objStart : arrStart;
+  if (jsonStart < 0) return raw;
+  s = s.slice(jsonStart);
+
+  // Replace single quotes with double quotes (but not inside already-quoted strings)
+  // Simple approach: replace single quotes used as field delimiters
+  s = s.replace(/'/g, '"');
+
+  // Fix double commas
+  s = s.replace(/,\s*,/g, ",");
+
+  // Fix trailing commas before closing brackets
+  s = s.replace(/,\s*([}\]])/g, "$1");
+
+  // Fix missing quotes around property names (bare words before colon)
+  s = s.replace(/([{,])\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":');
+
+  // If truncated (missing closing brackets), try to add them
+  let depth = 0;
+  let inString = false;
+  for (const ch of s) {
+    if (ch === '"' && (s[s.indexOf(ch) - 1] !== '\\')) inString = !inString;
+    if (!inString) {
+      if (ch === '{' || ch === '[') depth++;
+      if (ch === '}' || ch === ']') depth--;
+    }
+  }
+  if (depth > 0) {
+    while (depth-- > 0) s += '}';
   }
 
+  return s;
+}
+
+/**
+ * Normalise field names — map AI alternative naming to our expected fields.
+ */
+function normaliseVolume(v: RawVolume): { title: string; summary: string; arcGoal: string; chapters: RawChapter[] } {
+  return {
+    title: v.title || v.volume_name || "未命名卷",
+    summary: v.summary || v.volume_summary || "",
+    arcGoal: v.arcGoal || v.volume_goal || v.volume_arc || "",
+    chapters: Array.isArray(v.chapters) ? v.chapters : [],
+  };
+}
+
+function normaliseChapter(c: RawChapter): { title: string; outline: string; horrorBeat: string; hook: string } {
+  return {
+    title: c.title || c.chapter_title || "未命名章",
+    outline: c.outline || c.chapter_outline || c.summary || "",
+    horrorBeat: c.horrorBeat || c.core_horror || "",
+    hook: c.hook || c.chapter_hook || "",
+  };
+}
+
+function parseOutlineJSON(content: string): ParsedOutline | null {
+  const repaired = repairJSON(content);
+
+  let parsed: RawOutline | RawVolume[];
   try {
-    const parsed = JSON.parse(jsonStr);
+    parsed = JSON.parse(repaired);
+  } catch {
+    // Last resort: try parsing just the first JSON object if there are multiple
+    return null;
+  }
 
-    let volumes: ParsedOutline["volumes"];
-    if (Array.isArray(parsed)) {
-      volumes = parsed;
-    } else if (parsed.volumes) {
-      volumes = parsed.volumes;
+  let rawVolumes: RawVolume[];
+  if (Array.isArray(parsed)) {
+    rawVolumes = parsed;
+  } else {
+    const obj = parsed as RawOutline;
+    if (obj.volumes && Array.isArray(obj.volumes)) {
+      rawVolumes = obj.volumes;
     } else {
-      const arrayKey = Object.keys(parsed).find((k) => Array.isArray(parsed[k]));
+      // Search for any array-valued key
+      const arrayKey = Object.keys(obj).find((k) => Array.isArray((obj as any)[k]));
       if (arrayKey) {
-        volumes = parsed[arrayKey];
+        rawVolumes = (obj as any)[arrayKey];
       } else {
         return null;
       }
     }
-
-    return { volumes };
-  } catch {
-    return null;
   }
+
+  if (rawVolumes.length === 0) return null;
+
+  const volumes = rawVolumes.map(normaliseVolume);
+
+  return {
+    volumes: volumes.map((v) => ({
+      title: v.title,
+      summary: v.summary,
+      arcGoal: v.arcGoal,
+      chapters: v.chapters.map(normaliseChapter),
+    })),
+  };
 }
