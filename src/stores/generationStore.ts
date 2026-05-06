@@ -118,16 +118,19 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           // Try incremental parsing — update tree view as JSON arrives
           const partialVolumes = tryParsePartialOutline(fullContent);
           const partialChapters = partialVolumes
-            ? partialVolumes.flatMap((v) => v.chapters.map((ch) => ({
-                ...ch,
-                volumeId: v._tempId || "",
-                projectId,
-                indexNo: 0,
-                content: "",
-                summary: "",
-                wordCount: 0,
-                status: "pending" as const,
-              })))
+            ? partialVolumes.flatMap((v) =>
+                v.chapters.map((ch, ci) => ({
+                  ...ch,
+                  id: `${v._tempId}_ch_${ci + 1}`,
+                  volumeId: v._tempId || "",
+                  projectId,
+                  indexNo: ci + 1,
+                  content: "",
+                  summary: "",
+                  wordCount: 0,
+                  status: "pending" as const,
+                }))
+              )
             : [];
 
           set({
@@ -332,6 +335,14 @@ interface ParsedOutline {
 
 // ============== JSON Parser (robust) ==============
 
+/** A single volume after normalisation (before DB insert). */
+interface ParsedVolume {
+  title: string;
+  summary: string;
+  arcGoal: string;
+  chapters: RawChapter[];
+}
+
 interface RawOutline {
   total_chapters?: number;
   volumes?: RawVolume[];
@@ -365,11 +376,61 @@ interface RawChapter {
 }
 
 /**
- * Repair common JSON formatting issues from LLM output:
- * - Double commas (,, → ,)
- * - Trailing commas before ] or }
- * - Truncated JSON (missing closing brackets — append them)
- * - Single quotes instead of double quotes
+ * Extract all complete JSON objects `{...}` from partial content by tracking depth.
+ * Also fixes common LLM output issues (single quotes, double commas, trailing commas)
+ * on each extracted substring before returning individual objects.
+ */
+function extractCompleteObjects(raw: string): string[] {
+  let s = raw;
+
+  // Remove markdown code blocks (non-greedy, handle incomplete fences)
+  const jsonMatch = s.match(/```(?:json)?\s*([\s\S]*?)(```|$)/);
+  if (jsonMatch) {
+    s = jsonMatch[1].trim();
+  }
+
+  // Find where JSON starts
+  const objStart = s.indexOf("{");
+  const arrStart = s.indexOf("[");
+  const startIdx = objStart >= 0 && (arrStart < 0 || objStart < arrStart) ? objStart : arrStart;
+  if (startIdx < 0) return [];
+  s = s.slice(startIdx);
+
+  // Pre-process: fix common issues globally before depth scanning
+  s = s.replace(/'/g, '"');
+  s = s.replace(/,\s*,/g, ",");
+  s = s.replace(/,\s*([}\]])/g, "$1");
+  s = s.replace(/([{,])\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":');
+
+  // Depth-track to find complete objects
+  const results: string[] = [];
+  const startStack: number[] = [];
+  let inString = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    // Toggle string state (handle escaped quotes)
+    if (ch === '"' && (i === 0 || s[i - 1] !== '\\')) {
+      inString = !inString;
+    }
+    if (!inString) {
+      if (ch === '{') {
+        startStack.push(i);
+      } else if (ch === '}') {
+        const start = startStack.pop();
+        if (start !== undefined) {
+          results.push(s.slice(start, i + 1));
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Repair full JSON (for final parsing): same fixes as extractCompleteObjects
+ * but also closes any remaining open brackets.
  */
 function repairJSON(raw: string): string {
   let s = raw;
@@ -387,24 +448,18 @@ function repairJSON(raw: string): string {
   if (jsonStart < 0) return raw;
   s = s.slice(jsonStart);
 
-  // Replace single quotes with double quotes (but not inside already-quoted strings)
-  // Simple approach: replace single quotes used as field delimiters
+  // Fixes
   s = s.replace(/'/g, '"');
-
-  // Fix double commas
   s = s.replace(/,\s*,/g, ",");
-
-  // Fix trailing commas before closing brackets
   s = s.replace(/,\s*([}\]])/g, "$1");
-
-  // Fix missing quotes around property names (bare words before colon)
   s = s.replace(/([{,])\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":');
 
-  // If truncated (missing closing brackets), try to add them
+  // Close remaining brackets
   let depth = 0;
   let inString = false;
-  for (const ch of s) {
-    if (ch === '"' && (s[s.indexOf(ch) - 1] !== '\\')) inString = !inString;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '"' && (i === 0 || s[i - 1] !== '\\')) inString = !inString;
     if (!inString) {
       if (ch === '{' || ch === '[') depth++;
       if (ch === '}' || ch === ']') depth--;
@@ -439,42 +494,69 @@ function normaliseChapter(c: RawChapter): { title: string; outline: string; horr
 }
 
 /**
- * Try to incrementally parse partial JSON during streaming.
- * Uses repairJSON to close open brackets, then extracts what we can.
+ * Streaming incremental parser.
+ * Instead of trying to parse the whole partial JSON (which almost always fails),
+ * uses extractCompleteObjects to find INDIVIDUAL complete `{...}` objects
+ * within the stream. Each one is tried as a volume; if it has volume-like
+ * fields (volume_name/title/chapters) it's kept.
  */
-function tryParsePartialOutline(content: string): (ParsedVolume & { _tempId: string; _indexNo: number })[] | null {
+function tryParsePartialOutline(
+  content: string
+): (ParsedVolume & { _tempId: string; _indexNo: number })[] | null {
   if (!content || content.length < 20) return null;
 
-  const repaired = repairJSON(content);
-  let parsed: any;
-  try {
-    parsed = JSON.parse(repaired);
-  } catch {
-    return null;
+  const objects = extractCompleteObjects(content);
+  if (objects.length === 0) return null;
+
+  // Try each complete object as a volume (or as an envelope containing volumes)
+  const foundVolumes: any[] = [];
+
+  for (const objStr of objects) {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(objStr);
+    } catch {
+      continue;
+    }
+
+    if (!parsed || typeof parsed !== "object") continue;
+
+    if (Array.isArray(parsed)) {
+      // Direct array — could be the volumes array itself
+      for (const item of parsed) {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          foundVolumes.push(item);
+        }
+      }
+    } else if (parsed.volumes && Array.isArray(parsed.volumes)) {
+      // Outer envelope { "volumes": [...] }
+      for (const v of parsed.volumes) {
+        if (v && typeof v === "object") foundVolumes.push(v);
+      }
+    } else if (parsed.volume_name || Array.isArray(parsed.chapters)) {
+      // Looks like an individual volume object
+      // (NOT using `parsed.title` because chapter objects also have `title`!)
+      foundVolumes.push(parsed);
+    }
   }
 
-  // Extract raw volumes
-  let rawVolumes: any[];
-  if (Array.isArray(parsed)) {
-    rawVolumes = parsed;
-  } else if (parsed.volumes && Array.isArray(parsed.volumes)) {
-    rawVolumes = parsed.volumes;
-  } else {
-    const arrayKey = Object.keys(parsed).find((k) => Array.isArray(parsed[k]));
-    if (arrayKey) rawVolumes = parsed[arrayKey];
-    else return null;
-  }
+  if (foundVolumes.length === 0) return null;
 
-  if (rawVolumes.length === 0) return null;
+  // Deduplicate by title (streaming may re-emit same volumes as more data arrives)
+  const seen = new Set<string>();
+  const deduped = foundVolumes.filter((v) => {
+    const key = v.volume_name || v.title || "";
+    if (key && seen.has(key)) return false;
+    if (key) seen.add(key);
+    return true;
+  });
 
-  const counter = { vi: 0 };
-  return rawVolumes.map((v) => {
-    counter.vi++;
+  return deduped.map((v, i) => {
     const vol = normaliseVolume(v);
     return {
       ...vol,
-      _tempId: `temp_${counter.vi}`,
-      _indexNo: counter.vi,
+      _tempId: `temp_${i + 1}`,
+      _indexNo: i + 1,
     };
   });
 }
