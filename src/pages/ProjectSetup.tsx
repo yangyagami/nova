@@ -16,7 +16,7 @@ export default function ProjectSetup() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { currentProject, loading, getProject, updateProject, volumes, setVolumes, chapters, setChapters } = useProjectStore();
-  const { generatedVolumes, generatedChapters, loadOutline } = useGenerationStore();
+  const { generatedVolumes, generatedChapters, loadOutline, ensureOutlineForProject } = useGenerationStore();
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editForm, setEditForm] = useState({
     title: "",
@@ -34,12 +34,15 @@ export default function ProjectSetup() {
     }
   }, [id, getProject]);
 
-  // Load outline if project has been outlined
+  // Clear stale outline data when switching to a new/different project
   useEffect(() => {
-    if (currentProject && (currentProject.status === "outlining" || currentProject.status === "writing")) {
-      loadOutline(currentProject.id);
+    if (currentProject) {
+      ensureOutlineForProject(currentProject.id);
+      if (currentProject.status === "outlining" || currentProject.status === "writing") {
+        loadOutline(currentProject.id);
+      }
     }
-  }, [currentProject?.id, currentProject?.status]);
+  }, [currentProject?.id, currentProject?.status, ensureOutlineForProject, loadOutline]);
 
   // Sync generated data to project store
   useEffect(() => {

@@ -23,6 +23,7 @@ export default function OutlineView() {
     generateOutline,
     cancelGeneration,
     loadOutline,
+    ensureOutlineForProject,
   } = useGenerationStore();
 
   const [expandedVolumes, setExpandedVolumes] = useState<Set<string>>(new Set());
@@ -36,15 +37,16 @@ export default function OutlineView() {
     }
   }, [id, getProject]);
 
-  // Load existing outline
+  // Clear stale outline + load existing if any
   useEffect(() => {
     if (currentProject && !initialLoadDone) {
+      ensureOutlineForProject(currentProject.id);
       if (currentProject.status === "outlining" || currentProject.status === "writing") {
         loadOutline(currentProject.id);
       }
       setInitialLoadDone(true);
     }
-  }, [currentProject, initialLoadDone, loadOutline]);
+  }, [currentProject, initialLoadDone, loadOutline, ensureOutlineForProject]);
 
   // Auto-expand after generation
   useEffect(() => {

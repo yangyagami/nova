@@ -27,7 +27,8 @@ interface GenerationState {
   // Raw streaming output — visible in real time
   streamingContent: string;
 
-  // Generated outline data
+  // Generated outline data (track which project it belongs to)
+  outlineProjectId: string | null;
   generatedVolumes: Volume[];
   generatedChapters: Chapter[];
 
@@ -44,6 +45,8 @@ interface GenerationState {
   retryTask: () => void;
   reset: () => void;
   loadOutline: (projectId: string) => Promise<void>;
+  /** 如果内存中的大纲不属于指定项目则清空 */
+  ensureOutlineForProject: (projectId: string) => void;
 }
 
 function generateId(prefix: string): string {
@@ -59,6 +62,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
   error: null,
   abortController: null,
   streamingContent: "",
+  outlineProjectId: null,
   generatedVolumes: [],
   generatedChapters: [],
 
@@ -75,6 +79,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       error: null,
       abortController,
       streamingContent: "",
+      outlineProjectId: projectId,
       generatedVolumes: [],
       generatedChapters: [],
     });
@@ -198,6 +203,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       set({
         status: "done",
         currentStep: "大纲生成完成！",
+        outlineProjectId: projectId,
         generatedVolumes: volumes,
         generatedChapters: chapters,
         abortController: null,
@@ -235,6 +241,18 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     }
   },
 
+  ensureOutlineForProject: (projectId: string) => {
+    const { outlineProjectId } = get();
+    if (outlineProjectId !== null && outlineProjectId !== projectId) {
+      set({
+        outlineProjectId: null,
+        generatedVolumes: [],
+        generatedChapters: [],
+        streamingContent: "",
+      });
+    }
+  },
+
   reset: () => {
     set({
       task: null,
@@ -243,6 +261,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       error: null,
       abortController: null,
       streamingContent: "",
+      outlineProjectId: null,
       generatedVolumes: [],
       generatedChapters: [],
     });
@@ -259,7 +278,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         "SELECT id, project_id as projectId, volume_id as volumeId, index_no as indexNo, title, outline, horror_beat as horrorBeat, hook, content, summary, word_count as wordCount, status FROM chapters WHERE project_id = $1 ORDER BY index_no",
         [projectId]
       );
-      set({ generatedVolumes: volumes, generatedChapters: chapters });
+      set({ outlineProjectId: projectId, generatedVolumes: volumes, generatedChapters: chapters });
     } catch (e) {
       console.error("Failed to load outline:", e);
     }
