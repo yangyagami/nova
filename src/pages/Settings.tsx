@@ -20,6 +20,7 @@ import {
   Thermometer,
   AlignLeft,
 } from "lucide-react";
+import { chatCompletion } from "@/services/deepseek";
 
 export default function Settings() {
   const { settings, loadSettings, updateSettings, initialized } =
@@ -68,7 +69,6 @@ export default function Settings() {
     if (!apiKey) return;
     setTestResult("testing");
     try {
-      const { chatCompletion } = await import("@/services/deepseek");
       await chatCompletion(apiKey, {
         messages: [{ role: "user", content: "Hello" }],
         model,
