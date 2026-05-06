@@ -9,6 +9,7 @@ interface SettingsState {
   loadSettings: () => Promise<void>;
   updateSettings: (partial: Partial<AppSettings>) => Promise<void>;
   getApiKey: () => Promise<string>;
+  ensureLoaded: () => Promise<void>;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -103,9 +104,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   getApiKey: async () => {
     const { settings, loadSettings } = get();
-    if (!settings.apiKey) {
+    if (!settings.apiKey || !get().initialized) {
       await loadSettings();
     }
     return get().settings.apiKey;
+  },
+
+  /**
+   * 确保 settings 已从数据库加载（懒加载保护）
+   */
+  ensureLoaded: async () => {
+    const { initialized, loadSettings } = get();
+    if (!initialized) {
+      await loadSettings();
+    }
   },
 }));

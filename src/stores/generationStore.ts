@@ -83,7 +83,14 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     (get as any).__lastOutlineParams = lastParams;
 
     try {
+      // 确保 settings 已从数据库加载（防止首次使用时为默认空值）
+      await useSettingsStore.getState().ensureLoaded();
       const settings = useSettingsStore.getState().settings;
+
+      // 检查 API Key 是否配置
+      if (!settings.apiKey) {
+        throw new Error("请先在设置页配置 API Key");
+      }
 
       set({ currentStep: "正在构建 prompt..." });
 
