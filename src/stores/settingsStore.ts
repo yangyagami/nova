@@ -11,12 +11,16 @@ interface SettingsState {
   getApiKey: () => Promise<string>;
 }
 
+const DEFAULT_SETTINGS: AppSettings = {
+  apiKey: "",
+  apiBaseUrl: "https://api.deepseek.com/v1",
+  model: "deepseek-chat",
+  temperature: 0.85,
+  maxTokens: 8192,
+};
+
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  settings: {
-    apiKey: "",
-    model: "deepseek-chat",
-    temperature: 0.85,
-  },
+  settings: { ...DEFAULT_SETTINGS },
   loading: false,
   initialized: false,
 
@@ -25,7 +29,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const db = await getDb();
       const rows = await db.select<{ key: string; value: string }[]>(
-        "SELECT key, value FROM settings WHERE key IN ('api_key', 'model', 'temperature')"
+        "SELECT key, value FROM settings WHERE key IN ('api_key', 'api_base_url', 'model', 'temperature', 'max_tokens')"
       );
 
       const settingsMap: Record<string, string> = {};
@@ -35,11 +39,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
       set({
         settings: {
-          apiKey: settingsMap["api_key"] || "",
-          model: (settingsMap["model"] as AppSettings["model"]) || "deepseek-chat",
+          apiKey: settingsMap["api_key"] ?? DEFAULT_SETTINGS.apiKey,
+          apiBaseUrl: settingsMap["api_base_url"] ?? DEFAULT_SETTINGS.apiBaseUrl,
+          model: settingsMap["model"] ?? DEFAULT_SETTINGS.model,
           temperature: settingsMap["temperature"]
             ? parseFloat(settingsMap["temperature"])
-            : 0.85,
+            : DEFAULT_SETTINGS.temperature,
+          maxTokens: settingsMap["max_tokens"]
+            ? parseInt(settingsMap["max_tokens"], 10)
+            : DEFAULT_SETTINGS.maxTokens,
         },
         loading: false,
         initialized: true,
@@ -58,23 +66,35 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const db = await getDb();
 
-      if (partial.apiKey !== undefined) {
-        await db.execute(
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ($1, $2)",
-          ["api_key", partial.apiKey]
-        );
-      }
-      if (partial.model !== undefined) {
-        await db.execute(
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ($1, $2)",
-          ["model", partial.model]
-        );
-      }
-      if (partial.temperature !== undefined) {
-        await db.execute(
-          "INSERT OR REPLACE INTO settings (key, value) VALUES ($1, $2)",
-          ["temperature", String(partial.temperature)]
-        );
+      const keyMap: Record<string, string | undefined> = {
+        apiKey: partial.apiKey !== undefined ? partial.apiKey : undefined,
+        apiBaseUrl: partial.apiBaseUrl !== undefined ? partial.apiBaseUrl : undefined,
+        model: partial.model !== undefined ? partial.model : undefined,
+        temperature:
+          partial.temperature !== undefined
+            ? String(partial.temperature)
+            : undefined,
+        maxTokens:
+          partial.maxTokens !== undefined
+            ? String(partial.maxTokens)
+            : undefined,
+      };
+
+      const dbKeyMap: Record<string, string> = {
+        apiKey: "api_key",
+        apiBaseUrl: "api_base_url",
+        model: "model",
+        temperature: "temperature",
+        maxTokens: "max_tokens",
+      };
+
+      for (const [field, value] of Object.entries(keyMap)) {
+        if (value !== undefined) {
+          await db.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ($1, $2)",
+            [dbKeyMap[field], value]
+          );
+        }
       }
     } catch (e) {
       console.error("Failed to save settings:", e);

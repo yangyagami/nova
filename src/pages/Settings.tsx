@@ -2,18 +2,46 @@ import { useState, useEffect } from "react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { KeyRound, Save, RefreshCw, Eye, EyeOff } from "lucide-react";
+import { Select } from "@/components/ui/select";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  KeyRound,
+  Save,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  Globe,
+  Cpu,
+  Thermometer,
+  AlignLeft,
+} from "lucide-react";
+
+const MODEL_PRESETS = [
+  { value: "deepseek-chat", label: "DeepSeek V3 (¥0.5/M 输入 + ¥2/M 输出)" },
+  { value: "deepseek-reasoner", label: "DeepSeek R1 (¥4/M 输入 + ¥16/M 输出)" },
+];
 
 export default function Settings() {
-  const { settings, loadSettings, updateSettings, initialized } = useSettingsStore();
+  const { settings, loadSettings, updateSettings, initialized } =
+    useSettingsStore();
   const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState<"deepseek-chat" | "deepseek-reasoner">("deepseek-chat");
+  const [apiBaseUrl, setApiBaseUrl] = useState("");
+  const [model, setModel] = useState("deepseek-chat");
   const [temperature, setTemperature] = useState(0.85);
+  const [maxTokens, setMaxTokens] = useState(8192);
   const [showKey, setShowKey] = useState(false);
+  const [customModel, setCustomModel] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [testResult, setTestResult] = useState<"idle" | "testing" | "success" | "error">("idle");
+  const [testResult, setTestResult] = useState<
+    "idle" | "testing" | "success" | "error"
+  >("idle");
 
   useEffect(() => {
     if (!initialized) {
@@ -23,13 +51,26 @@ export default function Settings() {
 
   useEffect(() => {
     setApiKey(settings.apiKey);
+    setApiBaseUrl(settings.apiBaseUrl);
     setModel(settings.model);
     setTemperature(settings.temperature);
+    setMaxTokens(settings.maxTokens);
+    setCustomModel(
+      !MODEL_PRESETS.some((p) => p.value === settings.model)
+    );
   }, [settings]);
+
+  const isModelPreset = MODEL_PRESETS.some((p) => p.value === model);
 
   const handleSave = async () => {
     setSaving(true);
-    await updateSettings({ apiKey, model, temperature });
+    await updateSettings({
+      apiKey,
+      apiBaseUrl,
+      model,
+      temperature,
+      maxTokens,
+    });
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -45,10 +86,12 @@ export default function Settings() {
         model,
         temperature: 0.1,
         maxTokens: 10,
+        apiBaseUrl,
       });
       setTestResult("success");
       setTimeout(() => setTestResult("idle"), 3000);
-    } catch {
+    } catch (e) {
+      console.error("Test connection failed:", e);
       setTestResult("error");
       setTimeout(() => setTestResult("idle"), 3000);
     }
@@ -58,27 +101,20 @@ export default function Settings() {
     <div className="container mx-auto max-w-2xl py-8 space-y-8">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">设置</h1>
-        <p className="text-muted-foreground mt-2">配置 API Key 和生成参数</p>
+        <p className="text-muted-foreground mt-2">
+          配置 API 连接和生成参数
+        </p>
       </div>
 
-      {/* API Key */}
+      {/* API 密钥 */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <KeyRound className="h-5 w-5 text-primary" />
-            DeepSeek API 密钥
+            API 密钥
           </CardTitle>
           <CardDescription>
-            从{" "}
-            <a
-              href="https://platform.deepseek.com/api_keys"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary underline underline-offset-4"
-            >
-              platform.deepseek.com
-            </a>{" "}
-            获取 API Key。密钥仅在本地加密存储。
+            你的 API Key 仅在本地加密存储，仅用于调用你指定的 API。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -96,7 +132,11 @@ export default function Settings() {
                 onClick={() => setShowKey(!showKey)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showKey ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
               </button>
             </div>
             <Button
@@ -107,56 +147,184 @@ export default function Settings() {
               {testResult === "testing" ? (
                 <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
               ) : null}
-              {testResult === "success" ? "✓ 连接成功" : testResult === "error" ? "✗ 连接失败" : "测试连接"}
+              {testResult === "success"
+                ? "✓ 连接成功"
+                : testResult === "error"
+                  ? "✗ 连接失败"
+                  : "测试连接"}
             </Button>
           </div>
 
           <div className="p-3 rounded-md bg-muted/50 text-xs text-muted-foreground">
             <p className="font-medium mb-1">💡 安全提示</p>
-            <p>API Key 使用系统安全存储加密保存，仅在你调用 DeepSeek API 时使用。Nova 不会将你的密钥上传到任何第三方服务器。</p>
+            <p>
+              API Key 仅保存在本地 SQLite 数据库中，不会上传到任何第三方服务器。
+              你可以在任意兼容 OpenAI 格式的 API 服务商处获取 Key。
+            </p>
           </div>
         </CardContent>
       </Card>
 
-      {/* 模型选择 */}
+      {/* API 地址 */}
       <Card>
         <CardHeader>
-          <CardTitle>生成参数</CardTitle>
-          <CardDescription>配置默认使用的模型和生成参数</CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            <Globe className="h-5 w-5 text-primary" />
+            API 地址
+          </CardTitle>
+          <CardDescription>
+            默认使用 DeepSeek 官方 API。可以改为任何兼容 OpenAI 格式的 API
+            端点。
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <label className="text-sm font-medium">模型</label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value as "deepseek-chat" | "deepseek-reasoner")}
-              className="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm mt-1"
+          <Input
+            value={apiBaseUrl}
+            onChange={(e) => setApiBaseUrl(e.target.value)}
+            placeholder="https://api.deepseek.com/v1"
+            className="font-mono text-sm"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setApiBaseUrl("https://api.deepseek.com/v1")
+              }
+              className={apiBaseUrl === "https://api.deepseek.com/v1" ? "border-primary" : ""}
             >
-              <option value="deepseek-chat">DeepSeek Chat (v3，¥0.5/M 输入 + ¥2/M 输出)</option>
-              <option value="deepseek-reasoner">DeepSeek Reasoner (R1，¥4/M 输入 + ¥16/M 输出)</option>
-            </select>
+              DeepSeek 官方
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setApiBaseUrl("https://api.openai.com/v1")
+              }
+              className={apiBaseUrl === "https://api.openai.com/v1" ? "border-primary" : ""}
+            >
+              OpenAI 兼容
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            注意：地址末尾不需要 /chat/completions，程序会自动拼接。
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* 生成参数 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Cpu className="h-5 w-5 text-primary" />
+            生成参数
+          </CardTitle>
+          <CardDescription>配置默认使用的模型和生成参数</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* 模型选择 */}
+          <div className="space-y-2">
+            {!customModel ? (
+              <Select
+                label="模型"
+                value={isModelPreset ? model : ""}
+                onValueChange={(val) => {
+                  setModel(val);
+                  setCustomModel(false);
+                }}
+                options={MODEL_PRESETS}
+                placeholder="选择模型"
+              />
+            ) : (
+              <div>
+                <label className="text-sm font-medium">模型</label>
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder="输入模型名称（如 deepseek-chat）"
+                    className="flex-1 font-mono text-sm"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setModel(MODEL_PRESETS[0].value);
+                      setCustomModel(false);
+                    }}
+                    className="whitespace-nowrap"
+                  >
+                    预设
+                  </Button>
+                </div>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCustomModel(!customModel)}
+                className="text-xs text-muted-foreground hover:text-primary underline underline-offset-4"
+              >
+                {customModel ? "使用预设模型" : "使用自定义模型"}
+              </button>
+            </div>
           </div>
 
+          {/* 温度 */}
           <div>
-            <label className="text-sm font-medium">
-              温度 (Temperature): {temperature}
-            </label>
+            <div className="flex items-center gap-2">
+              <Thermometer className="h-4 w-4 text-muted-foreground" />
+              <label className="text-sm font-medium">
+                温度 (Temperature):{" "}
+                <span className="text-primary">{temperature.toFixed(2)}</span>
+              </label>
+            </div>
             <input
               type="range"
               min="0"
-              max="1"
+              max="2"
               step="0.05"
               value={temperature}
-              onChange={(e) => setTemperature(parseFloat(e.target.value))}
-              className="w-full mt-1"
+              onChange={(e) =>
+                setTemperature(parseFloat(e.target.value))
+              }
+              className="w-full mt-2 accent-primary"
             />
             <div className="flex justify-between text-xs text-muted-foreground mt-1">
               <span>精确 (0.0)</span>
-              <span>创意 (1.0)</span>
+              <span>平衡 (1.0)</span>
+              <span>创意 (2.0)</span>
             </div>
             <p className="text-xs text-muted-foreground mt-2">
-              建议值：大纲生成 0.7 | 正文生成 0.85 | 摘要抽取 0.2 | 润色 0.6
+              建议值：大纲 0.7 | 正文 0.85 | 摘要 0.2 | 润色 0.6
             </p>
+          </div>
+
+          {/* 最大 Token */}
+          <div>
+            <div className="flex items-center gap-2">
+              <AlignLeft className="h-4 w-4 text-muted-foreground" />
+              <label className="text-sm font-medium">
+                最大输出 Token:
+                <span className="text-primary ml-1">{maxTokens}</span>
+              </label>
+            </div>
+            <input
+              type="range"
+              min="512"
+              max="32768"
+              step="512"
+              value={maxTokens}
+              onChange={(e) =>
+                setMaxTokens(parseInt(e.target.value, 10))
+              }
+              className="w-full mt-2 accent-primary"
+            />
+            <div className="flex justify-between text-xs text-muted-foreground mt-1">
+              <span>512（短回复）</span>
+              <span>8192（默认）</span>
+              <span>32768（长文）</span>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -164,7 +332,11 @@ export default function Settings() {
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={saving}>
           <Save className="h-4 w-4 mr-2" />
-          {saving ? "保存中..." : saved ? "已保存" : "保存设置"}
+          {saving
+            ? "保存中..."
+            : saved
+              ? "✓ 已保存"
+              : "保存设置"}
         </Button>
       </div>
     </div>

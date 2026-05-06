@@ -184,7 +184,7 @@ export default function Dashboard() {
           <Select
             label="子类型"
             value={newProject.subgenre}
-            onChange={(e) => setNewProject({ ...newProject, subgenre: e.target.value as Subgenre })}
+            onValueChange={(val) => setNewProject({ ...newProject, subgenre: val as Subgenre })}
             options={[
               { value: "urban_legend", label: "都市怪谈" },
               { value: "folk_horror", label: "民俗恐怖" },

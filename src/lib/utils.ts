@@ -32,12 +32,16 @@ export function formatTokenCost(cny: number): string {
 export function estimateCost(
   promptTokens: number,
   completionTokens: number,
-  model: "deepseek-chat" | "deepseek-reasoner" = "deepseek-chat"
+  model: string = "deepseek-chat"
 ): number {
-  // DeepSeek pricing: input ¥0.5/M tokens, output ¥2/M tokens
-  const inputPrice = model === "deepseek-reasoner" ? 4.0 : 0.5;
-  const outputPrice = model === "deepseek-reasoner" ? 16.0 : 2.0;
-  return (promptTokens * inputPrice + completionTokens * outputPrice) / 1_000_000;
+  // DeepSeek official pricing
+  const pricing: Record<string, { input: number; output: number }> = {
+    "deepseek-chat": { input: 0.5, output: 2.0 },
+    "deepseek-reasoner": { input: 4.0, output: 16.0 },
+  };
+  const p = pricing[model];
+  if (!p) return 0;
+  return (promptTokens * p.input + completionTokens * p.output) / 1_000_000;
 }
 
 export function subgenreLabel(subgenre: string): string {

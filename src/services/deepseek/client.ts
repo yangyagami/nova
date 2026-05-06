@@ -1,7 +1,5 @@
 import type { Message, DeepSeekResponse } from "@/types";
 
-const DEEPSEEK_API_BASE = "https://api.deepseek.com/v1";
-
 export class DeepSeekError extends Error {
   status: number;
   body: unknown;
@@ -16,9 +14,10 @@ export class DeepSeekError extends Error {
 
 export interface ChatOptions {
   messages: Message[];
-  model?: "deepseek-chat" | "deepseek-reasoner";
+  model?: string;
   temperature?: number;
   maxTokens?: number;
+  apiBaseUrl?: string;
   signal?: AbortSignal;
   onToken?: (token: string) => void;
   onReasoning?: (token: string) => void;
@@ -35,7 +34,7 @@ export interface ChatResult {
 }
 
 /**
- * DeepSeek API 客户端
+ * DeepSeek API (兼容 OpenAI 格式) 客户端
  * 支持流式输出、自动重试（指数退避）、错误处理
  */
 export async function chatCompletion(
@@ -47,6 +46,7 @@ export async function chatCompletion(
     model = "deepseek-chat",
     temperature = 0.85,
     maxTokens = 8192,
+    apiBaseUrl = "https://api.deepseek.com/v1",
     signal,
     onToken,
     onReasoning,
@@ -75,9 +75,9 @@ export async function chatCompletion(
       }
 
       if (isStream) {
-        return await streamChat(apiKey, body, model, signal, onToken, onReasoning);
+        return await streamChat(apiKey, apiBaseUrl, body, signal, onToken, onReasoning);
       } else {
-        return await nonStreamChat(apiKey, body);
+        return await nonStreamChat(apiKey, apiBaseUrl, body);
       }
     } catch (err) {
       lastError = err as Error;
@@ -99,20 +99,21 @@ export async function chatCompletion(
       }
 
       console.warn(
-        `DeepSeek API attempt ${attempt + 1} failed:`,
+        `API attempt ${attempt + 1} failed:`,
         (err as Error).message
       );
     }
   }
 
-  throw lastError || new Error("Request failed after 3 retries");
+  throw lastError || new Error("请求失败（已重试 3 次）");
 }
 
 async function nonStreamChat(
   apiKey: string,
+  apiBaseUrl: string,
   body: string
 ): Promise<ChatResult> {
-  const response = await fetch(`${DEEPSEEK_API_BASE}/chat/completions`, {
+  const response = await fetch(`${apiBaseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -146,13 +147,13 @@ async function nonStreamChat(
 
 async function streamChat(
   apiKey: string,
+  apiBaseUrl: string,
   body: string,
-  model: string,
   signal?: AbortSignal,
   onToken?: (token: string) => void,
   onReasoning?: (token: string) => void
 ): Promise<ChatResult> {
-  const response = await fetch(`${DEEPSEEK_API_BASE}/chat/completions`, {
+  const response = await fetch(`${apiBaseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -104,8 +104,10 @@ export interface Foreshadow {
 // ============== 设置 (Settings) ==============
 export interface AppSettings {
   apiKey: string;
-  model: "deepseek-chat" | "deepseek-reasoner";
+  apiBaseUrl: string;
+  model: string;
   temperature: number;
+  maxTokens: number;
 }
 
 // ============== API 用量 ==============
@@ -128,7 +130,7 @@ export interface Message {
 
 export interface DeepSeekRequest {
   messages: Message[];
-  model: "deepseek-chat" | "deepseek-reasoner";
+  model: string;
   stream: boolean;
   temperature?: number;
   maxTokens?: number;
