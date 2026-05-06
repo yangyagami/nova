@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import {
   Card,
   CardContent,
@@ -22,11 +21,6 @@ import {
   AlignLeft,
 } from "lucide-react";
 
-const MODEL_PRESETS = [
-  { value: "deepseek-chat", label: "DeepSeek V3 (¥0.5/M 输入 + ¥2/M 输出)" },
-  { value: "deepseek-reasoner", label: "DeepSeek R1 (¥4/M 输入 + ¥16/M 输出)" },
-];
-
 export default function Settings() {
   const { settings, loadSettings, updateSettings, initialized } =
     useSettingsStore();
@@ -36,7 +30,6 @@ export default function Settings() {
   const [temperature, setTemperature] = useState(0.85);
   const [maxTokens, setMaxTokens] = useState(8192);
   const [showKey, setShowKey] = useState(false);
-  const [customModel, setCustomModel] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [testResult, setTestResult] = useState<
@@ -55,12 +48,7 @@ export default function Settings() {
     setModel(settings.model);
     setTemperature(settings.temperature);
     setMaxTokens(settings.maxTokens);
-    setCustomModel(
-      !MODEL_PRESETS.some((p) => p.value === settings.model)
-    );
   }, [settings]);
-
-  const isModelPreset = MODEL_PRESETS.some((p) => p.value === model);
 
   const handleSave = async () => {
     setSaving(true);
@@ -222,52 +210,18 @@ export default function Settings() {
           <CardDescription>配置默认使用的模型和生成参数</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* 模型选择 */}
-          <div className="space-y-2">
-            {!customModel ? (
-              <Select
-                label="模型"
-                value={isModelPreset ? model : ""}
-                onValueChange={(val) => {
-                  setModel(val);
-                  setCustomModel(false);
-                }}
-                options={MODEL_PRESETS}
-                placeholder="选择模型"
-              />
-            ) : (
-              <div>
-                <label className="text-sm font-medium">模型</label>
-                <div className="flex gap-2 mt-1">
-                  <Input
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder="输入模型名称（如 deepseek-chat）"
-                    className="flex-1 font-mono text-sm"
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setModel(MODEL_PRESETS[0].value);
-                      setCustomModel(false);
-                    }}
-                    className="whitespace-nowrap"
-                  >
-                    预设
-                  </Button>
-                </div>
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setCustomModel(!customModel)}
-                className="text-xs text-muted-foreground hover:text-primary underline underline-offset-4"
-              >
-                {customModel ? "使用预设模型" : "使用自定义模型"}
-              </button>
-            </div>
+          {/* 模型名称 */}
+          <div>
+            <label className="text-sm font-medium">模型名称</label>
+            <Input
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="deepseek-chat"
+              className="mt-1 font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-1.5">
+              填入你的 API 提供商支持的模型名称（如 deepseek-chat、gpt-4o、claude-sonnet-4 等）
+            </p>
           </div>
 
           {/* 温度 */}
