@@ -80,6 +80,7 @@ export default function Dashboard() {
         wordsPerChapter: 3000,
       });
     }
+    setShowNewDialog(true);
   };
 
   return (
