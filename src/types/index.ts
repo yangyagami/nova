@@ -2,6 +2,7 @@
 export interface Project {
   id: string;
   title: string;
+  projectType: ProjectType;
   subgenre: Subgenre;
   premise: string;
   targetWords: number;
@@ -12,16 +13,20 @@ export interface Project {
   updatedAt: number;
 }
 
+export type ProjectType = "novel" | "anthology";
+
 export type Subgenre = "urban_legend" | "folk_horror";
 export type ProjectStatus = "draft" | "outlining" | "writing" | "done";
 
 export interface CreateProjectInput {
   title: string;
+  projectType?: ProjectType;
   subgenre: Subgenre;
   premise: string;
   targetWords: number;
   targetChapters: number;
   wordsPerChapter: number;
+  protagonistName?: string;
 }
 
 // ============== 角色 (Character) ==============
@@ -56,7 +61,7 @@ export interface Volume {
 export interface Chapter {
   id: string;
   projectId: string;
-  volumeId: string;
+  volumeId: string | null;
   indexNo: number;
   title: string;
   outline: string;
@@ -66,6 +71,10 @@ export interface Chapter {
   summary: string;
   wordCount: number;
   status: ChapterStatus;
+  // 选集模式专属字段
+  storyPremise?: string;
+  storySetting?: string;
+  storyProtagonist?: string;
   generatedAt?: number;
   editedAt?: number;
 }
@@ -76,6 +85,7 @@ export type ChapterStatus = "pending" | "generating" | "done" | "error";
 export interface LoreEntry {
   id: string;
   projectId: string;
+  chapterId?: string;
   category: LoreCategory;
   name: string;
   description: string;

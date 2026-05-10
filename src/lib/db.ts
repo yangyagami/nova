@@ -12,6 +12,7 @@ export async function getDb(): Promise<Database> {
     CREATE TABLE IF NOT EXISTS projects (
       id            TEXT PRIMARY KEY,
       title         TEXT NOT NULL,
+      project_type  TEXT NOT NULL DEFAULT 'novel',
       subgenre      TEXT NOT NULL,
       premise       TEXT NOT NULL,
       target_words  INTEGER NOT NULL,
@@ -66,6 +67,9 @@ export async function getDb(): Promise<Database> {
       summary       TEXT,
       word_count    INTEGER DEFAULT 0,
       status        TEXT DEFAULT 'pending',
+      story_premise     TEXT,
+      story_setting     TEXT,
+      story_protagonist TEXT,
       generated_at  INTEGER,
       edited_at     INTEGER
     )
@@ -75,6 +79,7 @@ export async function getDb(): Promise<Database> {
     CREATE TABLE IF NOT EXISTS lore_entries (
       id            TEXT PRIMARY KEY,
       project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      chapter_id    TEXT REFERENCES chapters(id),
       category      TEXT NOT NULL,
       name          TEXT NOT NULL,
       description   TEXT,
@@ -124,6 +129,23 @@ export async function getDb(): Promise<Database> {
       value         TEXT
     )
   `);
+
+  // === 迁移：为已有数据库补充新字段 ===
+  // 注意: 新项目通过 CREATE TABLE IF NOT EXISTS 已包含这些字段
+  // 旧数据库需要通过 ALTER TABLE 补充，用 try-catch 忽略"字段已存在"错误
+  const migrations = [
+    // projects 表
+    `ALTER TABLE projects ADD COLUMN project_type TEXT NOT NULL DEFAULT 'novel'`,
+    // chapters 表
+    `ALTER TABLE chapters ADD COLUMN story_premise TEXT`,
+    `ALTER TABLE chapters ADD COLUMN story_setting TEXT`,
+    `ALTER TABLE chapters ADD COLUMN story_protagonist TEXT`,
+    // lore_entries 表
+    `ALTER TABLE lore_entries ADD COLUMN chapter_id TEXT REFERENCES chapters(id)`,
+  ];
+  for (const sql of migrations) {
+    try { await db.execute(sql); } catch { /* 字段已存在，忽略 */ }
+  }
 
   return db;
 }

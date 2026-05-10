@@ -4,6 +4,7 @@ import Dashboard from "@/pages/Dashboard";
 import Settings from "@/pages/Settings";
 import ProjectSetup from "@/pages/ProjectSetup";
 import OutlineView from "@/pages/OutlineView";
+import EditorView from "@/pages/EditorView";
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/project/:id" element={<ProjectSetup />} />
           <Route path="/project/:id/outline" element={<OutlineView />} />
+          <Route path="/project/:id/editor" element={<EditorView />} />
         </Route>
       </Routes>
     </BrowserRouter>

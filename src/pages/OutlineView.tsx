@@ -208,9 +208,15 @@ export default function OutlineView() {
                     <span className="text-xs text-primary animate-pulse">正在生成中...</span>
                   )}
                 </div>
-                <Badge variant="outline" className="text-xs">
-                  {status === "done" ? "✓ 已保存" : status === "generating" ? "⏳ 生成中" : "已加载"}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs">
+                    {status === "done" ? "✓ 已保存" : status === "generating" ? "⏳ 生成中" : "已加载"}
+                  </Badge>
+                  <Button size="sm" className="h-7 text-xs" onClick={() => navigate(`/project/${id}/editor`)}>
+                    <FileText className="h-3.5 w-3.5 mr-1" />
+                    进入编辑器
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -301,7 +307,11 @@ export default function OutlineView() {
                   重新生成
                 </Button>
               )}
-              <Button onClick={() => navigate(`/project/${id}`)}>返回项目</Button>
+              <Button onClick={() => navigate(`/project/${id}/editor`)}>
+                <FileText className="h-4 w-4 mr-2" />
+                进入编辑器
+              </Button>
+              <Button variant="outline" onClick={() => navigate(`/project/${id}`)}>返回项目</Button>
             </div>
           </div>
         </>

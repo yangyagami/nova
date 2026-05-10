@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useProjectStore } from "@/stores/projectStore";
 import { useGenerationStore } from "@/stores/generationStore";
@@ -8,9 +8,10 @@ import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { subgenreLabel, statusLabel, formatDate } from "@/lib/utils";
-import { ArrowLeft, Sparkles, Loader2, BookOpen, Settings2, FileText, BookOpenCheck, ListTree } from "lucide-react";
-import type { Subgenre } from "@/types";
+import { subgenreLabel, statusLabel, formatDate, cn } from "@/lib/utils";
+import { getDb } from "@/lib/db";
+import { ArrowLeft, Sparkles, Loader2, BookOpen, Settings2, FileText, BookOpenCheck, ListTree, UserPlus, Trash2, Edit3, Lock, Unlock } from "lucide-react";
+import type { Subgenre, Character, CharacterRole } from "@/types";
 
 export default function ProjectSetup() {
   const { id } = useParams<{ id: string }>();
@@ -236,21 +237,8 @@ export default function ProjectSetup() {
         </CardContent>
       </Card>
 
-      {/* Characters Section (placeholder for future) */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <BookOpenCheck className="h-5 w-5 text-primary" />
-            角色设定
-          </CardTitle>
-          <CardDescription>管理小说角色信息（即将上线）</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            在 M3 版本中，你将可以在此处添加和管理角色设定，包括主角、反派和配角的外貌、性格、秘密等信息。
-          </p>
-        </CardContent>
-      </Card>
+      {/* Characters Section */}
+      <CharacterManager projectId={id!} />
 
       {/* Edit Project Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
@@ -319,5 +307,289 @@ export default function ProjectSetup() {
         </div>
       </Dialog>
     </div>
+  );
+}
+
+// ==================== 角色管理组件 ====================
+function CharacterManager({ projectId }: { projectId: string }) {
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showDialog, setShowDialog] = useState(false);
+  const [editingChar, setEditingChar] = useState<Character | null>(null);
+  const [form, setForm] = useState({
+    name: "",
+    role: "supporting" as CharacterRole,
+    gender: "",
+    identity: "",
+    appearance: "",
+    personality: "",
+    secret: "",
+  });
+
+  const loadCharacters = useCallback(async () => {
+    setLoading(true);
+    try {
+      const db = await getDb();
+      const rows = await db.select<any[]>(
+        `SELECT id, project_id as projectId, name, role, gender, identity, appearance, personality, secret,
+                relationships, first_chapter as firstChapter, locked_fields as lockedFields, created_at as createdAt
+         FROM characters WHERE project_id = $1 ORDER BY created_at`,
+        [projectId]
+      );
+      setCharacters(
+        rows.map((r: any) => ({
+          ...r,
+          relationships: r.relationships ? JSON.parse(r.relationships) : {},
+          lockedFields: r.lockedFields ? JSON.parse(r.lockedFields) : [],
+        }))
+      );
+    } catch (e) {
+      console.error("Failed to load characters:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    loadCharacters();
+  }, [loadCharacters]);
+
+  const openNew = () => {
+    setEditingChar(null);
+    setForm({ name: "", role: "supporting", gender: "", identity: "", appearance: "", personality: "", secret: "" });
+    setShowDialog(true);
+  };
+
+  const openEdit = (ch: Character) => {
+    setEditingChar(ch);
+    setForm({
+      name: ch.name,
+      role: ch.role,
+      gender: ch.gender || "",
+      identity: ch.identity || "",
+      appearance: ch.appearance || "",
+      personality: ch.personality || "",
+      secret: ch.secret || "",
+    });
+    setShowDialog(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name) return;
+    const db = await getDb();
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    if (editingChar) {
+      await db.execute(
+        `UPDATE characters SET name = $1, role = $2, gender = $3, identity = $4, appearance = $5, personality = $6, secret = $7 WHERE id = $8`,
+        [form.name, form.role, form.gender, form.identity, form.appearance, form.personality, form.secret, editingChar.id]
+      );
+    } else {
+      const id = `char_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 6)}`;
+      await db.execute(
+        `INSERT INTO characters (id, project_id, name, role, gender, identity, appearance, personality, secret, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [id, projectId, form.name, form.role, form.gender, form.identity, form.appearance, form.personality, form.secret, timestamp]
+      );
+    }
+
+    setShowDialog(false);
+    loadCharacters();
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("确定要删除这个角色吗？")) return;
+    const db = await getDb();
+    await db.execute("DELETE FROM characters WHERE id = $1", [id]);
+    loadCharacters();
+  };
+
+  const toggleLock = async (ch: Character, field: string) => {
+    const locked = ch.lockedFields.includes(field)
+      ? ch.lockedFields.filter((f) => f !== field)
+      : [...ch.lockedFields, field];
+    const db = await getDb();
+    await db.execute("UPDATE characters SET locked_fields = $1 WHERE id = $2", [
+      JSON.stringify(locked),
+      ch.id,
+    ]);
+    loadCharacters();
+  };
+
+  const roleLabel = (role: string) => {
+    const map: Record<string, string> = {
+      protagonist: "主角",
+      antagonist: "反派",
+      supporting: "配角",
+    };
+    return map[role] || role;
+  };
+
+  const roleColor = (role: string) => {
+    const map: Record<string, string> = {
+      protagonist: "bg-blue-500/10 text-blue-500 border-blue-500/30",
+      antagonist: "bg-red-500/10 text-red-500 border-red-500/30",
+      supporting: "bg-green-500/10 text-green-500 border-green-500/30",
+    };
+    return map[role] || "";
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <BookOpenCheck className="h-5 w-5 text-primary" />
+              角色设定
+            </CardTitle>
+            <CardDescription>管理小说角色信息，可锁定字段防止 AI 误改</CardDescription>
+          </div>
+          <Button size="sm" onClick={openNew}>
+            <UserPlus className="h-4 w-4 mr-1" />
+            添加角色
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : characters.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-8">
+            暂无角色，点击「添加角色」开始创建
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {characters.map((ch) => (
+              <div
+                key={ch.id}
+                className="p-4 rounded-md border border-border/50 bg-muted/20 space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{ch.name}</span>
+                    <Badge variant="outline" className={cn("text-xs", roleColor(ch.role))}>
+                      {roleLabel(ch.role)}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(ch)}>
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleDelete(ch.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  {ch.gender && (
+                    <span>
+                      性别：<span className="text-foreground">{ch.gender}</span>
+                    </span>
+                  )}
+                  {ch.identity && (
+                    <span>
+                      身份：<span className="text-foreground">{ch.identity}</span>
+                    </span>
+                  )}
+                  {ch.appearance && (
+                    <span className="col-span-2">
+                      外貌：<span className="text-foreground">{ch.appearance}</span>
+                    </span>
+                  )}
+                  {ch.personality && (
+                    <span className="col-span-2">
+                      性格：<span className="text-foreground">{ch.personality}</span>
+                    </span>
+                  )}
+                  {ch.secret && (
+                    <span className="col-span-2">
+                      秘密/动机：<span className="text-foreground">{ch.secret}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 添加/编辑角色弹窗 */}
+        <Dialog open={showDialog} onOpenChange={setShowDialog}>
+          <div className="space-y-4">
+            <DialogHeader>
+              <DialogTitle>{editingChar ? "编辑角色" : "添加角色"}</DialogTitle>
+              <DialogDescription>
+                {editingChar ? "修改角色信息" : "填写新角色的详细信息"}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input
+                label="角色名"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="输入角色名"
+              />
+              <Select
+                label="角色定位"
+                value={form.role}
+                onValueChange={(val) => setForm({ ...form, role: val as CharacterRole })}
+                options={[
+                  { value: "protagonist", label: "主角" },
+                  { value: "antagonist", label: "反派" },
+                  { value: "supporting", label: "配角" },
+                ]}
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  label="性别"
+                  value={form.gender}
+                  onChange={(e) => setForm({ ...form, gender: e.target.value })}
+                  placeholder="男/女/未知"
+                />
+                <Input
+                  label="身份/职业"
+                  value={form.identity}
+                  onChange={(e) => setForm({ ...form, identity: e.target.value })}
+                  placeholder="如：大学生、记者"
+                />
+              </div>
+              <Input
+                label="外貌"
+                value={form.appearance}
+                onChange={(e) => setForm({ ...form, appearance: e.target.value })}
+                placeholder="角色的外貌描述"
+              />
+              <Input
+                label="性格"
+                value={form.personality}
+                onChange={(e) => setForm({ ...form, personality: e.target.value })}
+                placeholder="角色的性格特点"
+              />
+              <Input
+                label="秘密/动机"
+                value={form.secret}
+                onChange={(e) => setForm({ ...form, secret: e.target.value })}
+                placeholder="角色隐藏的秘密或行为动机"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowDialog(false)}>
+                取消
+              </Button>
+              <Button onClick={handleSave} disabled={!form.name}>
+                {editingChar ? "保存" : "添加"}
+              </Button>
+            </DialogFooter>
+          </div>
+        </Dialog>
+      </CardContent>
+    </Card>
   );
 }

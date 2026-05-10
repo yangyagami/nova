@@ -50,6 +50,7 @@ export default function Dashboard() {
     wordsPerChapter: 3000,
   });
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [generatingTemplate, setGeneratingTemplate] = useState(false);
   const [templateType, setTemplateType] = useState<"folk_horror" | "urban_legend" | null>(null);
   const [templateError, setTemplateError] = useState(false);
@@ -60,6 +61,7 @@ export default function Dashboard() {
 
   const handleCreate = async () => {
     if (!newProject.title || !newProject.premise) return;
+    setCreateError(null);
     setCreating(true);
     try {
       const project = await createProject({
@@ -69,11 +71,14 @@ export default function Dashboard() {
         targetWords: newProject.targetWords,
         targetChapters: newProject.targetChapters,
         wordsPerChapter: newProject.wordsPerChapter,
+        protagonistName: newProject.protagonistName || undefined,
       });
       setShowNewDialog(false);
       navigate(`/project/${project.id}`);
-    } catch (e) {
+    } catch (e: any) {
+      const msg = e?.message || String(e);
       console.error("Failed to create project:", e);
+      setCreateError(msg);
     } finally {
       setCreating(false);
     }
@@ -332,13 +337,18 @@ export default function Dashboard() {
             </div>
           )}
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowNewDialog(false)}>
-              取消
-            </Button>
-            <Button onClick={handleCreate} disabled={creating || generatingTemplate || !newProject.title || !newProject.premise}>
-              {creating ? "创建中..." : "创建项目"}
-            </Button>
+          <DialogFooter className="flex-col gap-2">
+            {createError && (
+              <p className="text-xs text-destructive w-full">创建失败：{createError}</p>
+            )}
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setShowNewDialog(false)}>
+                取消
+              </Button>
+              <Button onClick={handleCreate} disabled={creating || generatingTemplate || !newProject.title || !newProject.premise}>
+                {creating ? "创建中..." : "创建项目"}
+              </Button>
+            </div>
           </DialogFooter>
         </div>
       </Dialog>
